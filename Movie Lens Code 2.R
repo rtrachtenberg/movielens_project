@@ -85,6 +85,8 @@ data("movielens")
 set.seed(755)
 test_index <- createDataPartition(y = movielens$rating, times = 1,
                                   p = 0.2, list = FALSE)
+
+# Movie effect model
 train_set <- movielens[-test_index,]
 test_set <- movielens[test_index,]
 test_set <- test_set %>% 
@@ -107,6 +109,8 @@ model_1_rmse <- RMSE(predicted_ratings, test_set$rating)
 rmse_results <- bind_rows(rmse_results,
                           data_frame(method="Movie Effect Model",
                                      RMSE = model_1_rmse ))
+
+# user effect model
 user_avgs <- train_set %>% 
   left_join(movie_avgs, by='movieId') %>%
   group_by(userId) %>%
@@ -120,6 +124,25 @@ model_2_rmse <- RMSE(predicted_ratings, test_set$rating)
 rmse_results <- bind_rows(rmse_results,
                           data_frame(method="Movie + User Effects Model",  
                                      RMSE = model_2_rmse ))
+# genre effect model
+genre_avgs <- train_set %>%
+  left_join(movie_avgs, by="movieId") %>% 
+  left_join(user_avgs, by="userId") %>% 
+  group_by(genres) %>%
+  summarize(b_g = mean(rating - mu - b_i - b_u))
+predicted_ratings <- test_set %>% 
+  left_join(movie_avgs, by='movieId') %>%
+  left_join(user_avgs, by='userId') %>%
+  left_join(genre_avgs, by="genres") %>% 
+  mutate(pred = mu + b_i + b_u + b_g) %>%
+  pull(pred)
+model_3_rmse <- RMSE(predicted_ratings, test_set$rating)
+rmse_results <- bind_rows(rmse_results,
+                          data_frame(method="Movie + User + Genre Effects Model",  
+                                     RMSE = model_3_rmse ))
+# TODO: apply a fancy model to the data
+
+# reg
 
 lambda <- 3
 mu <- mean(train_set$rating)
