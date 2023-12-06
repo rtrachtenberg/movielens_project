@@ -277,7 +277,7 @@ rf_model_rmse
 
 # Update rmse_results
 rmse_results <- bind_rows(rmse_results,
-                          data_frame(method = "Random Forest - Subset of Data",  
+                          data_frame(method = "Random Forest on Subsetted Data",  
                                      RMSE = rf_model_rmse))
 rmse_results
 

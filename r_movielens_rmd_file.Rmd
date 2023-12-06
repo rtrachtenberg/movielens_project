@@ -95,7 +95,7 @@ movies <- movies %>%
 movielens <- left_join(ratings, movies, by = "movieId")  
 ```
 
-Finally, the final_holdout_test dataset (10% of the movielens dataset) was generated in order to provide a final test of our best model RMSE:
+Finally, the final_holdout_test dataset (10% of the movielens dataset) was generated in order to provide a final test of our best model RMSE at the end and the remaining edx set was joined back together:
 
 ```{r}
 set.seed(1, sample.kind="Rounding") # if using R 3.6 or later
@@ -168,7 +168,8 @@ Now, since there are so many distinct genre groups in the dataset (due to the po
 
 ```{r, warning = FALSE}
 
-# one hot encode the data to get individual genres
+# One-hot encode the data and split the genre into one per row 
+# (adding more rows as needed to accommodate the data) for ease of understanding the graph
 genres <- cSplit(edx, "genres", sep = "|", direction = "long")
 
 # Exclude "(no genres listed)" category
@@ -180,10 +181,13 @@ top_genres <- names(sort(table(genres$genres), decreasing = TRUE)[1:10])
 # Filter the dataset to include only the top 10 genres
 genres_top10 <- filter(genres, genres %in% top_genres)
 
+# Order the levels of the factor based on frequency
+genres_top10$genres <- factor(genres_top10$genres, levels = names(sort(table(genres_top10$genres), decreasing = TRUE)))
+
 # Create a bar plot
 barplot(table(genres_top10$genres), col = rainbow(10),
-        main = "Top 10 Genres Distribution", ylab = "Number of Ratings",
-        las = 2, cex.names = 0.8)  
+        main = "Top 10 Genres Distribution", ylab = "Frequency",
+        las = 2, cex.names = 0.8)  # las = 2 for vertical labels, adjust cex.names for label size  
 ```
 
 It looks like Drama is our top genre, with Comedy close behind in terms of number of ratings. However, note that one movie may occupy two to several genres.
@@ -379,7 +383,7 @@ rf_model_rmse
 
 # Update rmse_results
 rmse_results <- bind_rows(rmse_results,
-                          data_frame(method = "Random Forest - Subset of Data",  
+                          data_frame(method = "Random Forest on Subsetted Data",  
                                      RMSE = rf_model_rmse))
 rmse_results
 ```
