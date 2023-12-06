@@ -43,24 +43,26 @@ ratings <- ratings %>%
 movies <- as.data.frame(str_split(read_lines(movies_file), fixed("::"), simplify = TRUE),
                         stringsAsFactors = FALSE)
 colnames(movies) <- c("movieId", "title", "genres")
+
 movies <- movies %>%
   mutate(movieId = as.integer(movieId))
 
 movielens <- left_join(ratings, movies, by = "movieId")  
 
 # Final hold-out test set will be 10% of MovieLens data
+# NOTE: The hold-out test is NOT to be used throughout this code
 set.seed(1, sample.kind="Rounding") # if using R 3.6 or later
 
 test_index <- createDataPartition(y = movielens$rating, times = 1, p = 0.1, list = FALSE)
 edx <- movielens[-test_index,]
 temp <- movielens[test_index,]
 
-# Make sure userId and movieId in final hold-out test set are also in edx set
+# Make sure userId and movieId in test set are also in edx set
 final_holdout_test <- temp %>% 
   semi_join(edx, by = "movieId") %>%
   semi_join(edx, by = "userId")
 
-# Add rows removed from final hold-out test set back into edx set
+# Add rows removed from test set back into edx set
 removed <- anti_join(temp, final_holdout_test)
 edx <- rbind(edx, removed)
 
@@ -71,22 +73,35 @@ rm(dl, ratings, movies, test_index, temp, movielens, removed)
 # # Movie Lens Project: Generate movie ratings from the dataset
 
 # Conduct EDA
+# Since we conducted some EDA already in our quiz, we will keep this simple
+# to focus on modeling:
 
-movielens %>% count(movieId) %>% ggplot(aes(n)) + geom_density() + scale_x_log10()
-movielens %>% count(userId) %>% ggplot(aes(n)) + geom_density() + scale_x_log10()
-movielens %>% count(genres) %>% ggplot(aes(n)) + geom_density() + scale_x_log10()
+# Observe distribution of number of ratings by movieId and userId
+edx %>% count(movieId) %>% ggplot(aes(n)) + geom_density() + scale_x_log10() + ggtitle("movieId Distribution")
+edx %>% count(userId) %>% ggplot(aes(n)) + geom_density() + scale_x_log10() + ggtitle("userId Distribution")
 
-movielens %>% group_by(rating) %>% summarize(count = n()) %>% ggplot(aes(x = rating, y = count)) + geom_point()
+# Let's look into which ratings are most popular
+edx %>% group_by(rating) %>% summarize(count = n()) %>% ggplot(aes(x = rating, y = count)) + geom_point() + ggtitle("Rating Distribution")
+# Looks like a rating of 4 is most popular.
+# Whole number ratings tend to be more popular than half ratings
 
-# Generate a baseline model:
-overall_mean_rating <- mean(edx$rating)
-overall_mean_rating
+# Generate Machine Learning Models
 
+# Split the edx data into training and test sets
+train_index <- createDataPartition(y = edx$rating, times = 1, p = 0.8, list = FALSE)
+train_set <- edx[train_index,]
+test_set <- edx[-train_index,]
+
+# Set up RMSE function
 RMSE <- function(true_ratings, predicted_ratings) {
   sqrt(mean((true_ratings - predicted_ratings)^2))
 }
 
-simple_model_rmse <- RMSE(final_holdout_test$rating, overall_mean_rating)
+# Generate a baseline model:
+overall_mean_rating <- mean(train_set$rating)
+overall_mean_rating
+
+simple_model_rmse <- RMSE(test_set$rating, overall_mean_rating)
 simple_model_rmse
 
 # Save results in a table to compare to models later
@@ -96,46 +111,61 @@ rmse_summary
 
 # Add in the movie-specific effect using average by movie ID, find the RMSE, and save to table:
 
-movie_effect <- edx %>% 
+# Calculate movie effect based on the training set
+movie_effect_train <- train_set %>% 
   group_by(movieId) %>% 
-  summarize(b_m = mean(rating - overall_mean_rating))
-movie_effect
+  summarize(b_m = mean(rating - overall_mean_rating, na.rm = TRUE))
 
-combined_table <- final_holdout_test %>% 
-  left_join(movie_effect, by = "movieId") 
+# Left join the movie effect to the test set
+combined_table_test <- test_set %>% 
+  left_join(movie_effect_train, by = "movieId") 
 
-predicted_ratings <- combined_table %>%
-  mutate(predicted_value = overall_mean_rating + b_m) %>%
+# Make predictions on the test set, dealing with missing values that may arise
+# from joining tables above where movieId values in the test set are not present in the train_set
+predicted_ratings_test <- combined_table_test %>%
+  mutate(predicted_value = ifelse(is.na(b_m), overall_mean_rating, overall_mean_rating + b_m)) %>%
   pull(predicted_value)
-predicted_ratings
 
-model_2_rmse <- RMSE(predicted_ratings, final_holdout_test$rating)
+# Calculate RMSE for the test set
+model_2_rmse <- RMSE(test_set$rating, predicted_ratings_test)
 model_2_rmse
 
+# Update rmse_summary
 rmse_summary <- bind_rows(rmse_summary,
                           tibble(Model = "Model 2: Movie effect model",
                                  RMSE = model_2_rmse))
 rmse_summary
 
-# Apply regularization to movie-specific effect:
 
+# Apply regularization to movie-specific effect:
+# The regularization term (sum_rating / (count_movies + lambda)) 
+# introduces a penalty for large values of sum_rating or count_movies.
+
+# Create a list of lambdas to test
 lambdas <- seq(0, 10, 0.25)
-sum_only <- edx %>% 
+
+# calculate the # of ratings (count) and sum of the actual - mean rating for each movie
+# this data to be used later in the regularization term
+sum_only <- train_set %>% 
   group_by(movieId) %>% 
   summarize(sum_rating = sum(rating - overall_mean_rating), count_movies = n())
-  
+
+# Iterate over a sequence of lambda values and calculate RMSE for each lambda
+# For each lambda, calculate the predicted ratings from the test set using the regularized movie effect term (b_ml)
+# The regularization term is (sum_rating / (count_movies + lambda)), and the predictions are made by adding this term to the overall mean rating.
 regzed_rmses <- sapply(lambdas, function(lambda){
-  predicted_ratings <- final_holdout_test %>% 
+  predicted_ratings <- test_set %>% 
     left_join(sum_only, by='movieId') %>% 
     mutate(b_ml = sum_rating/(count_movies + lambda)) %>%
     mutate(pred = overall_mean_rating + b_ml) %>%
     .$pred
-  return(RMSE(final_holdout_test$rating, predicted_ratings))
+  return(RMSE(test_set$rating, predicted_ratings))
 })
+
 qplot(lambdas, regzed_rmses)  
 best_lambda <- lambdas[which.min(regzed_rmses)]
 
-b_m <- edx %>% 
+b_m <- train_set %>% 
   group_by(movieId) %>% 
   summarize(b_m = sum(rating - overall_mean_rating)/(n() + best_lambda))
 
@@ -150,6 +180,10 @@ model_3_rmse
 rmse_summary <- bind_rows(rmse_summary,
                           tibble(Model = "Model 3: Movie effect model w Regularization",
                                  RMSE = model_3_rmse))
+
+# When lambda is non-zero, the regularization term discourages extreme values in the movie effect. It has a shrinking effect, pulling the b_ml values towards zero.
+# This helps prevent overfitting, especially when there are few ratings (count_movies) for a movie.
+# However, this adjustment did not seem to help much.
 
 # Add in the user-specific effect:
 
