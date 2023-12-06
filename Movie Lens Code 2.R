@@ -188,5 +188,5 @@ cat("Optimal Lambda:", lambda_min, "\n")
 # Update rmse_results
 rmse_results <- bind_rows(rmse_results,
                           data_frame(method = "Regularized Movie + User + Genre Effect Model",  
-                                     RMSE = min(rmse_results_lambda$RMSE),
-                                     Lambda = lambda_min))
+                                     RMSE = min(rmse_results_lambda$RMSE)))
+rmse_results
