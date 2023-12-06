@@ -103,6 +103,25 @@ ggplot(edx %>% group_by(rating) %>% summarize(count = n()), aes(x = rating, y = 
 # Looks like a rating of 4 is most popular.
 # Whole number ratings tend to be more popular than half ratings
 
+# Visualize top genres:
+
+# one hot encode the data to get individual genres
+genres <- cSplit(edx, "genres", sep = "|", direction = "long")
+
+# Exclude "(no genres listed)" category
+genres <- filter(genres, genres != "(no genres listed)")
+
+# Get the top 10 genres
+top_genres <- names(sort(table(genres$genres), decreasing = TRUE)[1:10])
+
+# Filter the dataset to include only the top 10 genres
+genres_top10 <- filter(genres, genres %in% top_genres)
+
+# Create a bar plot
+barplot(table(genres_top10$genres), col = rainbow(10),
+        main = "Top 10 Genres Distribution", xlab = "Genres", ylab = "Number of Ratings",
+        las = 2, cex.names = 0.8) 
+
 
 # Generate Machine Learning Models
 

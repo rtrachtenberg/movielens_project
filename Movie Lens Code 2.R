@@ -11,6 +11,8 @@ library(dplyr)
 library(dslabs)
 library(data.table)
 library(ranger)
+library(splitstackshape)
+library(randomForest)
 
 options(timeout = 120)
 
@@ -104,6 +106,37 @@ ggplot(edx %>% group_by(rating) %>% summarize(count = n()), aes(x = rating, y = 
   theme(plot.title = element_text(hjust = 0.5))
 # Looks like a rating of 4 is most popular.
 # Whole number ratings tend to be more popular than half ratings
+
+# Visualize top genres:
+
+# Install and load required packages
+if (!require(tidyverse)) install.packages("tidyverse")
+if (!require(splitstackshape)) install.packages("splitstackshape")
+
+library(tidyverse)
+library(splitstackshape)
+
+# One-hot encode the data and split the genre into one per row 
+# (adding more rows as needed to accommodate the data) for ease of understanding the graph
+genres <- cSplit(edx, "genres", sep = "|", direction = "long")
+
+# Exclude "(no genres listed)" category
+genres <- filter(genres, genres != "(no genres listed)")
+
+# Get the top 10 genres
+top_genres <- names(sort(table(genres$genres), decreasing = TRUE)[1:10])
+
+# Filter the dataset to include only the top 10 genres
+genres_top10 <- filter(genres, genres %in% top_genres)
+
+# Order the levels of the factor based on frequency
+genres_top10$genres <- factor(genres_top10$genres, levels = names(sort(table(genres_top10$genres), decreasing = TRUE)))
+
+# Create a bar plot
+barplot(table(genres_top10$genres), col = rainbow(10),
+        main = "Top 10 Genres Distribution", xlab = "Genres", ylab = "Frequency",
+        las = 2, cex.names = 0.8)  # las = 2 for vertical labels, adjust cex.names for label size
+
 
 # Machine Learning Methods
 
@@ -249,9 +282,13 @@ predicted_ratings_rf <- predict(rf_model, newdata = test_set)
 rf_model_rmse <- RMSE(predicted_ratings_rf, test_set$rating)
 rf_model_rmse
 
-# Display RMSE for the Random Forest model
-cat("Random Forest Model RMSE:", rf_model_rmse, "\n")
+# Update rmse_results
+rmse_results <- bind_rows(rmse_results,
+                          data_frame(method = "Regularized Movie + User + Genre Effect Model",  
+                                     RMSE = rf_model_rmse))
+rmse_results
 
+# Now let's incorporate more runs subsets of the data using cross-validation:
 
 ## Cross validation
 
