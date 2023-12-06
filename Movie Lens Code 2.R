@@ -134,7 +134,7 @@ genres_top10$genres <- factor(genres_top10$genres, levels = names(sort(table(gen
 
 # Create a bar plot
 barplot(table(genres_top10$genres), col = rainbow(10),
-        main = "Top 10 Genres Distribution", xlab = "Genres", ylab = "Frequency",
+        main = "Top 10 Genres Distribution", ylab = "Frequency",
         las = 2, cex.names = 0.8)  # las = 2 for vertical labels, adjust cex.names for label size
 
 
@@ -320,9 +320,80 @@ for (fold in 1:num_folds) {
   
 }
 
+rmse_results <- bind_rows(rmse_results,
+                          data_frame(method = "Cross Validated Model",  
+                                     RMSE = cv_rmse))
+rmse_results
+
 # Calculate RMSE on the full validation set
 cv_rmse <- RMSE(cv_predictions, cv_data$rating)
 cat("Cross-validated RMSE:", cv_rmse, "\n")
 
+# Results:
 
+# Let's test our best model against the holdout_test_set to achieve our final RMSE:
 
+# Regularization parameter search for Movie + User + Genre Effect Model
+lambdas <- seq(0, 10, 0.25)
+
+# Initialize an empty dataframe to store results
+rmse_results_lambda <- data.frame(Lambda = numeric(), RMSE = numeric())
+
+for (lambda in lambdas) {
+  # Movie effect model with regularization
+  movie_avgs_reg <- train_set %>% 
+    group_by(movieId) %>% 
+    summarize(b_i = sum(rating - mu) / (n() + lambda))
+  
+  # User effect model with regularization
+  user_avgs_reg <- train_set %>% 
+    left_join(movie_avgs_reg, by = "movieId") %>%
+    group_by(userId) %>%
+    summarize(b_u = sum(rating - mu - b_i) / (n() + lambda))
+  
+  # Genre effect model with regularization
+  genre_avgs_reg <- train_set %>%
+    left_join(movie_avgs_reg, by = "movieId") %>% 
+    left_join(user_avgs_reg, by = "userId") %>% 
+    group_by(genres) %>%
+    summarize(b_g = sum(rating - mu - b_i - b_u) / (n() + lambda))
+  
+  # Predict on the final holdout test
+  predicted_ratings <- final_holdout_test %>% 
+    left_join(movie_avgs_reg, by = "movieId") %>%
+    left_join(user_avgs_reg, by = "userId") %>%
+    left_join(genre_avgs_reg, by = "genres") %>% 
+    mutate(pred = mu + b_i + b_u + b_g) %>%
+    pull(pred)
+  
+  # Filter out rows with missing values
+  valid_rows <- !is.na(predicted_ratings)
+  predicted_ratings <- predicted_ratings[valid_rows]
+  final_holdout_ratings <- final_holdout_test$rating[valid_rows]
+  
+  # Calculate RMSE
+  model_rmse <- RMSE(predicted_ratings, final_holdout_ratings)
+  
+  # Print RMSE value
+  cat("Lambda:", lambda, "RMSE:", model_rmse, "\n")
+  
+  # Store the results
+  rmse_results_lambda <- bind_rows(rmse_results_lambda,
+                                   data.frame(Lambda = lambda, RMSE = model_rmse))
+}
+
+# Plot RMSE vs. lambda
+qplot(x = Lambda, y = RMSE, data = rmse_results_lambda) + geom_point() +
+  labs(title = "RMSE vs. Lambda for Regularized Movie + User + Genre Effect Model")
+
+# Find the lambda with the minimum RMSE
+lambda_min <- rmse_results_lambda$Lambda[which.min(rmse_results_lambda$RMSE)]
+
+# Display the optimal lambda
+cat("Optimal Lambda:", lambda_min, "\n")
+
+# Display RMSE
+final_rmse = min(rmse_results_lambda$RMSE)
+round(final_rmse, 5)
+
+# We have achieved a final RMSE of 0.86526

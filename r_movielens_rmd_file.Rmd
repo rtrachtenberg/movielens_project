@@ -182,11 +182,11 @@ genres_top10 <- filter(genres, genres %in% top_genres)
 
 # Create a bar plot
 barplot(table(genres_top10$genres), col = rainbow(10),
-        main = "Top 10 Genres Distribution", xlab = "Genres", ylab = "Number of Ratings",
+        main = "Top 10 Genres Distribution", ylab = "Number of Ratings",
         las = 2, cex.names = 0.8)  
 ```
 
-It looks drama is our top genre, with comedy close behind in terms of number of ratings. 
+It looks drama is our top genre, with comedy close behind in terms of number of ratings. However, note that one movie may occupy two to several genres.
 
 ### Modeling
 
@@ -384,12 +384,133 @@ rmse_results <- bind_rows(rmse_results,
 rmse_results
 ```
 
+This is an interesting exercise in that it gives an RMSE similar to that of our basic movie effect model. Instead of running a more comprehensive random forest model (that would likely take multiple hours to run) with a larger portion or the full dataset.
+
 #### Cross-Validation
 
 Finally, let's try cross-validation. This will help us split the data into more manageable chunks to run the model on.
 
 ```{r}
+# Set the number of folds for cross-validation
+num_folds <- 5  # You can adjust the number of folds as needed
 
+# Create a data frame for cross-validation
+cv_data <- train_set
+
+# Create an empty vector to store cross-validated predictions
+cv_predictions <- numeric(length = nrow(cv_data))
+
+# Perform cross-validation
+for (fold in 1:num_folds) {
+  # Create training and validation sets for the current fold
+  set.seed(fold)  # Ensure reproducibility across folds
+  fold_indices <- createDataPartition(y = cv_data$rating, p = 0.8, list = FALSE)
+  train_fold <- cv_data[fold_indices, ]
+  val_fold <- cv_data[-fold_indices, ]
+  
+  # Train the random forest model using ranger
+  rf_model <- ranger(rating ~ userId + movieId, data = train_fold, num.trees = 50)
+  
+  # Make predictions on the validation set
+  fold_predictions <- predict(rf_model, data = val_fold)$predictions
+  
+  # Store the predictions in the cv_predictions vector
+  cv_predictions[-fold_indices] <- fold_predictions
+  
+}
+
+# Calculate RMSE on the full validation set
+cv_rmse <- RMSE(cv_predictions, cv_data$rating)
+cat("Cross-validated RMSE:", cv_rmse, "\n")
+
+rmse_results <- bind_rows(rmse_results,
+                          data_frame(method = "Cross Validated Model",  
+                                     RMSE = cv_rmse))
+rmse_results
+```
+
+This was a good experiment and way to see if we could analyze smaller portions of the data and aggregate results (which we clearly can!), but the RMSE is less performant with this cross-validation method compared to the other RMSEs achieved with previous models, so we will likely run our final_holdout_test on a model that achieved a better RMSE with the test_set.
+
+## Results
+
+Based on the rmse table, let's run our final_holdout_test on the best-performing model, the regularized movie + user + genre effect model:
+
+```{r}
+# Let's test our best model against the holdout_test_set to achieve our final RMSE:
+
+# Regularization parameter search for Movie + User + Genre Effect Model
+lambdas <- seq(0, 10, 0.25)
+
+# Initialize an empty dataframe to store results
+rmse_results_lambda <- data.frame(Lambda = numeric(), RMSE = numeric())
+
+for (lambda in lambdas) {
+  # Movie effect model with regularization
+  movie_avgs_reg <- train_set %>% 
+    group_by(movieId) %>% 
+    summarize(b_i = sum(rating - mu) / (n() + lambda))
+  
+  # User effect model with regularization
+  user_avgs_reg <- train_set %>% 
+    left_join(movie_avgs_reg, by = "movieId") %>%
+    group_by(userId) %>%
+    summarize(b_u = sum(rating - mu - b_i) / (n() + lambda))
+  
+  # Genre effect model with regularization
+  genre_avgs_reg <- train_set %>%
+    left_join(movie_avgs_reg, by = "movieId") %>% 
+    left_join(user_avgs_reg, by = "userId") %>% 
+    group_by(genres) %>%
+    summarize(b_g = sum(rating - mu - b_i - b_u) / (n() + lambda))
+  
+  # Predict on the final holdout test
+  predicted_ratings <- final_holdout_test %>% 
+    left_join(movie_avgs_reg, by = "movieId") %>%
+    left_join(user_avgs_reg, by = "userId") %>%
+    left_join(genre_avgs_reg, by = "genres") %>% 
+    mutate(pred = mu + b_i + b_u + b_g) %>%
+    pull(pred)
+  
+  # Filter out rows with missing values
+  valid_rows <- !is.na(predicted_ratings)
+  predicted_ratings <- predicted_ratings[valid_rows]
+  final_holdout_ratings <- final_holdout_test$rating[valid_rows]
+  
+  # Calculate RMSE
+  model_rmse <- RMSE(predicted_ratings, final_holdout_ratings)
+  
+  # Print RMSE value
+  cat("Lambda:", lambda, "RMSE:", model_rmse, "\n")
+  
+  # Store the results
+  rmse_results_lambda <- bind_rows(rmse_results_lambda,
+                                   data.frame(Lambda = lambda, RMSE = model_rmse))
+}
+
+# Plot RMSE vs. lambda
+qplot(x = Lambda, y = RMSE, data = rmse_results_lambda) + geom_point() +
+  labs(title = "RMSE vs. Lambda for Regularized Movie + User + Genre Effect Model")
+
+# Find the lambda with the minimum RMSE
+lambda_min <- rmse_results_lambda$Lambda[which.min(rmse_results_lambda$RMSE)]
+
+# Display the optimal lambda
+cat("Optimal Lambda:", lambda_min, "\n")
+
+# Display RMSE
+final_rmse = min(rmse_results_lambda$RMSE)
+round(final_rmse, 5)
+
+# We have achieved a final RMSE of 0.86526
 ```
 
 
+## Conclusion
+
+Overall, we achieved a decent RMSE using the regularized movie + user + genre effect model, but I think there were many opportunities here for improvement within our data pre-processing and modeling processes.
+
+First and foremost, I think this dataset required much more cleaning and refining than was completed in my project. Because there are so many observations, the data could have benefitted from some strategic subsetting, such as removing rows where no genre was listed, analyzing the timestamps and removing any rows showing years prior to a reasonable date range for the data, and removing observations showing major outliers in any of the variables. Also, I did not explore effects of the "timestamp" variable on rating, which could have provided valuable information and improved RMSE in certain models. This would have been relatively easy to transform this variable to a more usable and readable format.
+
+In addition, using sparse matrices and one-hot encoding of genre variables to run in random forest models could have provided a more robust model for us to use. It was a challenge to run efficient models without overwhelming my machine and taking hours of runtime to test models, so further exploration of how to strategically subset and run this random forest model in a more efficient way could have been beneficial. In addition, tuning hyperparameters of the random forest model could have had the potential to significantly improve those results. This is something I plan to explore in the choose-your-own capstone project.
+
+Finally, just like experimenting with the hyperparameters in random forest would have likely helped the results, experimenting with different folds and parameters in the cross-validated model could have also likely improved results. In addition, using bootstrapping methods could have been a good strategy to explore as a modeling technique.
