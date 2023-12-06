@@ -72,8 +72,6 @@ edx <- rbind(edx, removed)
 
 rm(dl, ratings, movies, test_index, temp, movielens, removed)
 
-# NOTE TO SELF: split remaining edx into train and test sets
-
 # # Movie Lens Project: Generate movie ratings from the dataset
 
 # Conduct EDA
@@ -164,40 +162,6 @@ rmse_summary <- bind_rows(rmse_summary,
                                  RMSE = model_2_rmse))
 rmse_summary
 
-# Regularize movie specific effect:
-
-lambdas <- seq(0, 10, 0.25)
-sum_only <- train_set %>% 
-  group_by(movieId) %>% 
-  summarize(sum_rating = sum(rating - overall_mean_rating), count_movies = n())
-
-regzed_rmses <- sapply(lambdas, function(lambda){
-  predicted_ratings <- test_set %>% 
-    left_join(sum_only, by='movieId') %>% 
-    mutate(b_ml = sum_rating/(count_movies + lambda)) %>%
-    mutate(pred = overall_mean_rating + b_ml) %>%
-    .$pred
-  return(RMSE(test_set$rating, predicted_ratings))
-})
-  
-best_lambda <- lambdas[which.min(regzed_rmses)]
-best_lambda
-
-b_m <- train_set %>% 
-  group_by(movieId) %>% 
-  summarize(b_m = sum(rating - overall_mean_rating)/(n() + best_lambda))
-
-predicted_ratings <- combined_table %>%
-  mutate(predicted_value = overall_mean_rating + b_m) %>%
-  pull(predicted_value)
-predicted_ratings
-
-model_3_rmse <- RMSE(predicted_ratings, test_set$rating)
-model_3_rmse
-
-rmse_summary <- bind_rows(rmse_summary,
-                          tibble(Model = "Model 3: Movie effect model w Regularization",
-                                 RMSE = model_3_rmse))
 
 # Add in the user-specific effect:
 
@@ -223,55 +187,6 @@ rmse_summary <- bind_rows(rmse_summary,
                                  RMSE = model_3_rmse))
 
 
-# Apply regularization to movie- and user-specific effect:
-# The regularization term (sum_rating / (count_movies + lambda)) 
-# introduces a penalty for large values of sum_rating or count_movies.
-
-# Create a list of lambdas to test
-lambdas <- seq(0, 5, 0.5)
-
-# calculate the # of ratings (count) and sum of the actual - mean rating for each movie
-# this data to be used later in the regularization term
-sum_only <- train_set %>% 
-  group_by(movieId) %>% 
-  summarize(sum_rating = sum(rating - overall_mean_rating), count_movies = n())
-
-# Iterate over a sequence of lambda values and calculate RMSE for each lambda
-# For each lambda, calculate the predicted ratings from the test set using the regularized movie effect term (b_ml)
-# The regularization term is (sum_rating / (count_movies + lambda)), and the predictions are made by adding this term to the overall mean rating.
-regzed_rmses <- sapply(lambdas, function(lambda){
-  predicted_ratings <- test_set %>% 
-    left_join(sum_only, by='movieId') %>% 
-    mutate(b_ml = sum_rating/(count_movies + lambda)) %>%
-    mutate(pred = overall_mean_rating + b_ml) %>%
-    .$pred
-  return(RMSE(test_set$rating, predicted_ratings))
-})
-
-best_lambda <- lambdas[which.min(regzed_rmses)]
-best_lambda
-
-b_m <- train_set %>% 
-  group_by(movieId) %>% 
-  summarize(b_m = sum(rating - overall_mean_rating)/(n() + best_lambda))
-
-predicted_ratings <- combined_table %>%
-  mutate(predicted_value = overall_mean_rating + b_m) %>%
-  pull(predicted_value)
-predicted_ratings
-
-model_4_rmse <- RMSE(predicted_ratings, test_set$rating)
-model_4_rmse
-
-rmse_summary <- bind_rows(rmse_summary,
-                          tibble(Model = "Model 4: Regularized Model",
-                                 RMSE = model_4_rmse))
-
-
-# When lambda is non-zero, the regularization term discourages extreme values in the movie effect. It has a shrinking effect, pulling the b_ml values towards zero.
-# This helps prevent overfitting, especially when there are few ratings (count_movies) for a movie.
-# However, this adjustment did not seem to help at all, considering the best lambda was 0.
-
 
 # add in genre-specific effect
 
@@ -289,12 +204,12 @@ combined_table
 predicted_ratings <- combined_table %>% mutate(predicted_value = overall_mean_rating + b_m + b_u) %>% 
   pull(predicted_value)
 
-model_3_rmse <- RMSE(predicted_ratings, test_set$rating)
-model_3_rmse
+model_4_rmse <- RMSE(predicted_ratings, test_set$rating)
+model_4_rmse
 
 rmse_summary <- bind_rows(rmse_summary,
-                          tibble(Model = "Model 3: Movie and user effect model",
-                                 RMSE = model_3_rmse))
+                          tibble(Model = "Model 4: Genre, movie, and user effect model",
+                                 RMSE = model_4_rmse))
 
 
 moviegenres_test <- head(train_set %>% select(movieId, genres))
