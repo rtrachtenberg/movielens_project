@@ -13,17 +13,10 @@ library(caret)
 library(stringr)
 library(readr)
 library(dplyr)
+library(dslabs)
 library(data.table)
 
 options(timeout = 120)
-
-# note to self: The final_holdout_test set is meant to provide a final, 
-# unbiased estimate of your single best model. 
-# To test the performance of multiple models before choosing the best one, 
-# split the edx set into train and test sets and/or use cross-validation. 
-# The final_holdout_test may not be be used for model training, model development, 
-# or selecting from multiple models or else you will only receive 5 out of 25 points 
-# for the RMSE section of your MovieLens project.
 
 dl <- "ml-10M100K.zip"
 if(!file.exists(dl))
@@ -39,6 +32,7 @@ if(!file.exists(movies_file))
 
 ratings <- as.data.frame(str_split(read_lines(ratings_file), fixed("::"), simplify = TRUE),
                          stringsAsFactors = FALSE)
+
 colnames(ratings) <- c("userId", "movieId", "rating", "timestamp")
 ratings <- ratings %>%
   mutate(userId = as.integer(userId),
@@ -74,27 +68,22 @@ edx <- rbind(edx, removed)
 
 rm(dl, ratings, movies, test_index, temp, movielens, removed)
 
-## Regularization
+# Split edx dataset into test and train sets
 
-### Regularization
-
-library(dslabs)
-library(tidyverse)
-library(caret)
-data("movielens")
-set.seed(755)
-test_index <- createDataPartition(y = movielens$rating, times = 1,
+test_index <- createDataPartition(y = edx$rating, times = 1,
                                   p = 0.2, list = FALSE)
-
-# Movie effect model
-train_set <- movielens[-test_index,]
-test_set <- movielens[test_index,]
+train_set <- edx[-test_index,]
+test_set <- edx[test_index,]
 test_set <- test_set %>% 
   semi_join(train_set, by = "movieId") %>%
   semi_join(train_set, by = "userId")
+
+# Define RMSE function
 RMSE <- function(true_ratings, predicted_ratings){
   sqrt(mean((true_ratings - predicted_ratings)^2))
 }
+
+# Run basic movie effect model
 mu_hat <- mean(train_set$rating)
 naive_rmse <- RMSE(test_set$rating, mu_hat)
 rmse_results <- data_frame(method = "Just the average", RMSE = naive_rmse)
@@ -140,93 +129,64 @@ model_3_rmse <- RMSE(predicted_ratings, test_set$rating)
 rmse_results <- bind_rows(rmse_results,
                           data_frame(method="Movie + User + Genre Effects Model",  
                                      RMSE = model_3_rmse ))
-# TODO: apply a fancy model to the data
-
-# reg
-
-lambda <- 3
-mu <- mean(train_set$rating)
-movie_reg_avgs <- train_set %>% 
-  group_by(movieId) %>% 
-  summarize(b_i = sum(rating - mu)/(n()+lambda), n_i = n()) 
 
 
-tibble(original = movie_avgs$b_i, 
-       regularlized = movie_reg_avgs$b_i, 
-       n = movie_reg_avgs$n_i) %>%
-  ggplot(aes(original, regularlized, size=sqrt(n))) + 
-  geom_point(shape=1, alpha=0.5)
+# Apply regularization to the movie + user + genre model
+# WARNING: This code will take at least 5 mins to run depending on machine capabilities
 
-train_set %>%
-  count(movieId) %>% 
-  left_join(movie_reg_avgs, by="movieId") %>%
-  left_join(movie_titles, by="movieId") %>%
-  arrange(desc(b_i)) %>% 
-  dplyr::select(title, b_i, n) %>% 
-  slice(1:10) %>% 
-  pull(title)
-
-train_set %>%
-  dplyr::count(movieId) %>% 
-  left_join(movie_reg_avgs, by="movieId") %>%
-  left_join(movie_titles, by="movieId") %>%
-  arrange(b_i) %>% 
-  dplyr::select(title, b_i, n) %>% 
-  slice(1:10) %>% 
-  pull(title)
-
-predicted_ratings <- test_set %>% 
-  left_join(movie_reg_avgs, by='movieId') %>%
-  mutate(pred = mu + b_i) %>%
-  pull(pred)
-
-model_3_rmse <- RMSE(predicted_ratings, test_set$rating)
-rmse_results <- bind_rows(rmse_results,
-                          data_frame(method="Regularized Movie Effect Model",  
-                                     RMSE = model_3_rmse ))
-rmse_results %>% knitr::kable()
-
+# Regularization parameter search for Movie + User + Genre Effect Model
 lambdas <- seq(0, 10, 0.25)
-mu <- mean(train_set$rating)
-just_the_sum <- train_set %>% 
-  group_by(movieId) %>% 
-  summarize(s = sum(rating - mu), n_i = n())
-rmses <- sapply(lambdas, function(l){
-  predicted_ratings <- test_set %>% 
-    left_join(just_the_sum, by='movieId') %>% 
-    mutate(b_i = s/(n_i+l)) %>%
-    mutate(pred = mu + b_i) %>%
-    pull(pred)
-  return(RMSE(predicted_ratings, test_set$rating))
-})
-qplot(lambdas, rmses)  
-lambdas[which.min(rmses)]
 
-lambdas <- seq(0, 10, 0.25)
-rmses <- sapply(lambdas, function(l){
-  mu <- mean(train_set$rating)
-  b_i <- train_set %>% 
-    group_by(movieId) %>%
-    summarize(b_i = sum(rating - mu)/(n()+l))
-  b_u <- train_set %>% 
-    left_join(b_i, by="movieId") %>%
+# Initialize an empty dataframe to store results
+rmse_results_lambda <- data.frame(Lambda = numeric(), RMSE = numeric())
+
+for (lambda in lambdas) {
+  # Movie effect model with regularization
+  movie_avgs_reg <- train_set %>% 
+    group_by(movieId) %>% 
+    summarize(b_i = sum(rating - mu) / (n() + lambda))
+  
+  # User effect model with regularization
+  user_avgs_reg <- train_set %>% 
+    left_join(movie_avgs_reg, by = "movieId") %>%
     group_by(userId) %>%
-    summarize(b_u = sum(rating - b_i - mu)/(n()+l))
-  predicted_ratings <- 
-    test_set %>% 
-    left_join(b_i, by = "movieId") %>%
-    left_join(b_u, by = "userId") %>%
-    mutate(pred = mu + b_i + b_u) %>%
+    summarize(b_u = sum(rating - mu - b_i) / (n() + lambda))
+  
+  # Genre effect model with regularization
+  genre_avgs_reg <- train_set %>%
+    left_join(movie_avgs_reg, by = "movieId") %>% 
+    left_join(user_avgs_reg, by = "userId") %>% 
+    group_by(genres) %>%
+    summarize(b_g = sum(rating - mu - b_i - b_u) / (n() + lambda))
+  
+  # Predict on the test set
+  predicted_ratings <- test_set %>% 
+    left_join(movie_avgs_reg, by = "movieId") %>%
+    left_join(user_avgs_reg, by = "userId") %>%
+    left_join(genre_avgs_reg, by = "genres") %>% 
+    mutate(pred = mu + b_i + b_u + b_g) %>%
     pull(pred)
-  return(RMSE(predicted_ratings, test_set$rating))
-})
+  
+  # Calculate RMSE
+  model_rmse <- RMSE(predicted_ratings, test_set$rating)
+  
+  # Store the results
+  rmse_results_lambda <- bind_rows(rmse_results_lambda,
+                                   data.frame(Lambda = lambda, RMSE = model_rmse))
+}
 
-qplot(lambdas, rmses)  
+# Plot RMSE vs. lambda
+qplot(Lambda, RMSE, data = rmse_results_lambda) + geom_point() +
+  labs(title = "RMSE vs. Lambda for Regularized Movie + User + Genre Effect Model")
 
-lambda <- lambdas[which.min(rmses)]
-lambda
+# Find the lambda with the minimum RMSE
+lambda_min <- rmse_results_lambda$Lambda[which.min(rmse_results_lambda$RMSE)]
 
+# Display the optimal lambda
+cat("Optimal Lambda:", lambda_min, "\n")
+
+# Update rmse_results
 rmse_results <- bind_rows(rmse_results,
-                          data_frame(method="Regularized Movie + User Effect Model",  
-                                     RMSE = min(rmses)))
-rmse_results %>% knitr::kable()
+                          data_frame(method = "Regularized Movie + User + Genre Effect Model",  
+                                     RMSE = min(rmse_results_lambda$RMSE),
+                                     Lambda = lambda_min))
