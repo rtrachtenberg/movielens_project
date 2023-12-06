@@ -1,5 +1,8 @@
 # Movielens Project
 
+# Note that the cross-validation model below may take ~20-30 minutes to run.
+# Either skip this portion or time your review accordingly.
+
 # Load libraries
 if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
 if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")

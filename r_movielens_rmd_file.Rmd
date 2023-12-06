@@ -55,6 +55,7 @@ options(timeout = 120)
 ```
 
 Then, the data was downloaded. merged, and class/column names slightly adjusted to be more comprehensive and readable:
+
 ```{r}
 
 # Load data set from grouplens website
@@ -117,7 +118,6 @@ edx <- rbind(edx, removed)
 rm(dl, ratings, movies, test_index, temp, movielens, removed)
 ```
 
-
 ### Exploratory Data Analysis
 
 First, we should explore the distribution of the number of ratings by movieId:
@@ -133,7 +133,7 @@ ggplot(edx %>% count(movieId), aes(x = n)) +
   theme(plot.title = element_text(hjust = 0.5))
 ```
 
-From the plot, it looks like ratings are relatively normally distributed across all movies. This makes sense since this is a large dataset with millions of observations, and the Central Limit Theorem tells us that the sampling distribution of the mean will always be normally distributed, as long as the sample size is large enough.
+From the plot, it looks like ratings are relatively log-normally distributed across all movies. This makes sense since this is a large dataset with millions of observations, and the Central Limit Theorem tells us that the sampling distribution of the mean will always be normally distributed, as long as the sample size is large enough.
 
 Next, let's look at distribution of number of ratings per userId:
 
@@ -148,7 +148,7 @@ ggplot(edx %>% count(userId), aes(x = n)) +
   theme(plot.title = element_text(hjust = 0.5))
 ```
 
-This density plot is showing a relatively right skewed distribution of ratings per user. 
+This density plot is showing a relatively right skewed distribution of ratings per user, showing that a majority of users submitted less or a medium amount of ratings to the data. This makes sense since only a small subset are likely to be movie critics or consistent reviewers.
 
 Now, let's explore which discrete ratings were most popular among users:
 
@@ -219,7 +219,7 @@ RMSE <- function(true_ratings, predicted_ratings){
 
 Let's start by running code provided by instructors to get an idea of what a simple model would yield if we just considered movie effect in addition to overall mean rating:
 
-```{r}
+```{r, warning = FALSE}
 # start with the mean of all ratings
 mu_hat <- mean(train_set$rating) 
 naive_rmse <- RMSE(test_set$rating, mu_hat) 
@@ -264,7 +264,6 @@ rmse_results <- bind_rows(rmse_results,
 rmse_results # show updated table
 ```
 
-
 #### Movie + User + Genre Effects Model
 
 The addition of user effect yields a slightly better RMSE, but let's see if we can do even better by building on course code and adding in the genre-specific effect:
@@ -293,10 +292,9 @@ rmse_results # show updated table
 
 #### Regularized Movie + User + Genre Effects Model
 
-
 Now let's see if we can improve our model by incorporating regularization:
 
-```{r}
+```{r, warning = FALSE}
 # Apply regularization to the movie + user + genre model
 # WARNING: This code will take at least 5 mins to run depending on machine capabilities
 
@@ -388,7 +386,7 @@ rmse_results <- bind_rows(rmse_results,
 rmse_results
 ```
 
-This is an interesting exercise in that it gives an RMSE similar to that of our basic movie effect model. Instead of running a more comprehensive random forest model (that would likely take multiple hours to run) with a larger portion or the full dataset, we can try to use techniques such as cross-validation to evaluate our model.
+This is an interesting exercise in that it gives an RMSE worse than that of our model showing just the rating average. Instead of running a more comprehensive random forest model (that would likely take multiple hours to run) with a larger portion or the full dataset, we can try to use techniques such as cross-validation to run and evaluate our model.
 
 #### Cross-Validation
 
@@ -437,7 +435,7 @@ rmse_results
 
 ```
 
-When this code ran previously, I got an RMSE value of 0.953, so in case you didn't want to take 20-30 minutes to run the code above, I have added this rmse value to the table for simplicity and ease of evaluation. Set this code chunk to eval = FALSE in the rmd file if you would like to run the code above instead.
+When this code ran previously, I got an RMSE value of 0.953, so in case you didn't want to take 20-30 minutes to run the code above, I have added this rmse value to the table for simplicity and ease of evaluation. Set the below code chunk to eval = FALSE in the rmd file if you would like to run the code above instead.
 
 ```{r}
 rmse_results <- bind_rows(rmse_results,
@@ -445,7 +443,6 @@ rmse_results <- bind_rows(rmse_results,
                                      RMSE = 0.953))
 rmse_results
 ```
-
 
 This was a good experiment and way to see if we could fit smaller portions of the data and aggregate results (which we clearly can!), but the RMSE is less performant with this cross-validation method compared to the other RMSEs achieved with previous models, so we will likely run our final_holdout_test on a model that achieved a better RMSE with the test_set.
 
@@ -532,7 +529,7 @@ We have achieved a final RMSE of 0.86526.
 
 ## Conclusion
 
-Overall, we achieved a decent RMSE using the regularized movie + user + genre effect model, but I think there were many opportunities here for improvement within our data pre-processing and modeling processes.
+Overall, we achieved a decent RMSE using the regularized movie + user + genre effect model, but I think there were many opportunities here for improvement in our data pre-processing and modeling approach.
 
 First and foremost, I think this dataset required much more cleaning and refining than was completed in my project. Although NAs were addressed in most of the models run, because there are so many observations, the data could have benefitted from some strategic subsetting, such as removing rows where no genre was listed, analyzing the timestamps and removing any rows showing years prior to a reasonable date range for the data, and removing observations showing major outliers in any of the variables. Also, I did not explore effects of the "timestamp" variable on rating, which could have provided valuable information and improved RMSE in certain models. This would have been relatively straightforward to implement and transform this variable to a more usable and readable format.
 
