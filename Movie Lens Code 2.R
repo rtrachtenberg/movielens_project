@@ -290,7 +290,7 @@ rmse_results
 num_folds <- 5  # You can adjust the number of folds as needed
 
 # Create an empty vector to store cross-validated predictions
-cv_predictions <- numeric(length = nrow(cv_data))
+cv_predictions <- numeric(length = nrow(train_set))
 cv_rmse <- 0  # Initialize RMSE
 
 # Perform cross-validation

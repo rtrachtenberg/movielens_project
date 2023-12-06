@@ -379,7 +379,7 @@ rf_model_rmse
 
 # Update rmse_results
 rmse_results <- bind_rows(rmse_results,
-                          data_frame(method = "Regularized Movie + User + Genre Effect Model",  
+                          data_frame(method = "Random Forest - Subset of Data",  
                                      RMSE = rf_model_rmse))
 rmse_results
 ```
@@ -390,14 +390,14 @@ This is an interesting exercise in that it gives an RMSE similar to that of our 
 
 Finally, let's try cross-validation. This will help us split the data into more manageable chunks to run the model on.
 
-```{r}
-# WARNING: This code could take up to ~30 minutes to run, pending your machine capabilities
+```{r, eval = FALSE}
+# WARNING: This code could take up to ~30 minutes to run, pending your machine capabilities. I have set the "eval = " argument in this code chunk of the rmd file to "FALSE" so that it will not run if the reviewer does not wish to run it in the rmd file itself.
 
 # Set the number of folds for cross-validation
 num_folds <- 5  # You can adjust the number of folds as needed
 
 # Create an empty vector to store cross-validated predictions
-cv_predictions <- numeric(length = nrow(cv_data))
+cv_predictions <- numeric(length = nrow(train_set))
 cv_rmse <- 0  # Initialize RMSE
 
 # Perform cross-validation
@@ -432,6 +432,16 @@ rmse_results <- bind_rows(rmse_results,
 rmse_results
 
 ```
+
+When this code ran previously, I got an RMSE value of 0.953, so in case you didn't want to take 20-30 minutes to run the code above, I have added this rmse value to the table for simplicity and ease of evaluation. Set this code chunk to eval = FALSE in the rmd file if you would like to run the code above instead.
+
+```{r}
+rmse_results <- bind_rows(rmse_results,
+                          data_frame(method = "Cross Validated Model",  
+                                     RMSE = 0.953))
+rmse_results
+```
+
 
 This was a good experiment and way to see if we could fit smaller portions of the data and aggregate results (which we clearly can!), but the RMSE is less performant with this cross-validation method compared to the other RMSEs achieved with previous models, so we will likely run our final_holdout_test on a model that achieved a better RMSE with the test_set.
 
@@ -512,9 +522,9 @@ cat("Optimal Lambda:", lambda_min, "\n")
 final_rmse = min(rmse_results_lambda$RMSE)
 round(final_rmse, 5)
 
-# We have achieved a final RMSE of 0.86526
 ```
 
+We have achieved a final RMSE of 0.86526.
 
 ## Conclusion
 
@@ -524,4 +534,4 @@ First and foremost, I think this dataset required much more cleaning and refinin
 
 In addition, using sparse matrices and one-hot encoding of genre variables to run in random forest models could have provided a more robust model for us to use. It was a challenge to run efficient models without overwhelming my machine and taking hours of runtime to test models, so further exploration of how to strategically subset and run this random forest model in a more efficient way could have been beneficial. In addition, tuning hyperparameters of the random forest model could have had the potential to significantly improve those results. This is something I plan to explore and implement in a different context as part of the choose-your-own capstone project process.
 
-Finally, just like experimenting with the hyperparameters in random forest would have likely helped the results, experimenting with different folds and parameters in the cross-validated model could have also likely improved results. In addition, using bootstrapping methods could have been a good strategy to explore as a modeling technique.
+Finally, just like experimenting with the hyperparameters in random forest would have likely helped the results, experimenting with different fold numbers and parameters in the cross-validated model could have also likely improved results. In addition, using bootstrapping methods could have been a good strategy to explore as a modeling technique.
