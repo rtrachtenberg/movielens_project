@@ -13,9 +13,9 @@ knitr::opts_chunk$set(echo = TRUE)
 
 According to the Edx project description, the `movielens` data is pulled from the `dslabs` R package and contains a subset of a much larger dataset with millions of movie ratings. This version of the dataset contains 10 million observations with the following variables:
 
--   **userId** is a discrete variable that contains a unique identifier for each user, or movie rater. Note that there can be more than one of the same userId in this dataset if they rate more than one movie or a movie more than once at a different time).
+-   **userId** is a discrete variable that contains a unique identifier for each user, or movie rater. Note that there can be more than one of the same userId in this dataset if they rate more than one movie or if they rate the same movie more than once at a different time.
 
--   **movieId** is a also a discrete variable that contains a unique identifier for each movie. Note that there can be more than one of the same movieId in this dataset, representing multiple ratings for the same movie.
+-   **movieId** is a also a discrete variable that contains a unique identifier for each movie. Note that there can be more than one of the same movieId in this dataset, representing multiple ratings for the same movie from different users at different times.
 
 -   **rating** is a discrete variable indicating the number of "stars" awarded to the movie by a specific user at a certain time. Note that there are 11 distinct values that can be awarded, from 0 - 5 and incremented by 0.5.
 
@@ -133,7 +133,7 @@ ggplot(edx %>% count(movieId), aes(x = n)) +
   theme(plot.title = element_text(hjust = 0.5))
 ```
 
-From the plot, it looks like ratings are relatively normally distributed across all movies.
+From the plot, it looks like ratings are relatively normally distributed across all movies. This makes sense since this is a large dataset with millions of observations, and the Central Limit Theorem tells us that the sampling distribution of the mean will always be normally distributed, as long as the sample size is large enough.
 
 Next, let's look at distribution of number of ratings per userId:
 
@@ -148,9 +148,9 @@ ggplot(edx %>% count(userId), aes(x = n)) +
   theme(plot.title = element_text(hjust = 0.5))
 ```
 
-Again, this density plot is showing a relatively normal distribution of ratings per user. This makes sense since this is a large dataset with millions of observations, and the Central Limit Theorem tells us that the sampling distribution of the mean will always be normally distributed, as long as the sample size is large enough.
+This density plot is showing a relatively right skewed distribution of ratings per user. 
 
-Now, let's explore which ratings were most popular among users:
+Now, let's explore which discrete ratings were most popular among users:
 
 ```{r}
 ggplot(edx %>% group_by(rating) %>% summarize(count = n()), aes(x = rating, y = count)) +
@@ -164,9 +164,9 @@ ggplot(edx %>% group_by(rating) %>% summarize(count = n()), aes(x = rating, y = 
 
 Seems like a rating of "4" is most popular and whole number ratings tend to be more popular than half ratings.
 
-Now, since there are so many distinct genre groups in the dataset (due to the possibility of combinations of genres) let's see if we can split and visualize the top 10 genres, let's clean/organize the genre data and plot the top 10 genres:
+Now, since there are so many distinct genre groups in the dataset (due to the possibility of individual plus combinations of genres) let's see if we can split the data and visualize the top 10 genres:
 
-```{r}
+```{r, warning = FALSE}
 
 # one hot encode the data to get individual genres
 genres <- cSplit(edx, "genres", sep = "|", direction = "long")
@@ -186,7 +186,7 @@ barplot(table(genres_top10$genres), col = rainbow(10),
         las = 2, cex.names = 0.8)  
 ```
 
-It looks drama is our top genre, with comedy close behind in terms of number of ratings. However, note that one movie may occupy two to several genres.
+It looks like Drama is our top genre, with Comedy close behind in terms of number of ratings. However, note that one movie may occupy two to several genres.
 
 ### Modeling
 
@@ -213,7 +213,7 @@ RMSE <- function(true_ratings, predicted_ratings){
 
 #### Basic Movie Effects Model
 
-Let's start by running code provided by instructors to get an idea of what a simple model would yield if we just considered movie effect in addition to overall rating mean:
+Let's start by running code provided by instructors to get an idea of what a simple model would yield if we just considered movie effect in addition to overall mean rating:
 
 ```{r}
 # start with the mean of all ratings
@@ -290,7 +290,7 @@ rmse_results # show updated table
 #### Regularized Movie + User + Genre Effects Model
 
 
-Now let's see if we can improve our model by adding in regularization:
+Now let's see if we can improve our model by incorporating regularization:
 
 ```{r}
 # Apply regularization to the movie + user + genre model
@@ -358,7 +358,7 @@ This seems to give a similar result to the previous model, indicating that regul
 
 #### Random Forest using Subsetted Data
 
-Let's try an ensemble method, using random forest and a subset of the training data due to data processing time and capabilities:
+Let's try an ensemble machining learning method, using random forest and a subset of the training data (due to data processing time and machine memory and processing capabilities):
 
 ```{r}
 # random forest model
@@ -384,29 +384,29 @@ rmse_results <- bind_rows(rmse_results,
 rmse_results
 ```
 
-This is an interesting exercise in that it gives an RMSE similar to that of our basic movie effect model. Instead of running a more comprehensive random forest model (that would likely take multiple hours to run) with a larger portion or the full dataset.
+This is an interesting exercise in that it gives an RMSE similar to that of our basic movie effect model. Instead of running a more comprehensive random forest model (that would likely take multiple hours to run) with a larger portion or the full dataset, we can try to use techniques such as cross-validation to evaluate our model.
 
 #### Cross-Validation
 
 Finally, let's try cross-validation. This will help us split the data into more manageable chunks to run the model on.
 
 ```{r}
+# WARNING: This code could take up to ~30 minutes to run, pending your machine capabilities
+
 # Set the number of folds for cross-validation
 num_folds <- 5  # You can adjust the number of folds as needed
 
-# Create a data frame for cross-validation
-cv_data <- train_set
-
 # Create an empty vector to store cross-validated predictions
 cv_predictions <- numeric(length = nrow(cv_data))
+cv_rmse <- 0  # Initialize RMSE
 
 # Perform cross-validation
 for (fold in 1:num_folds) {
   # Create training and validation sets for the current fold
   set.seed(fold)  # Ensure reproducibility across folds
-  fold_indices <- createDataPartition(y = cv_data$rating, p = 0.8, list = FALSE)
-  train_fold <- cv_data[fold_indices, ]
-  val_fold <- cv_data[-fold_indices, ]
+  fold_indices <- createDataPartition(y = train_set$rating, p = 0.8, list = FALSE)
+  train_fold <- train_set[fold_indices, ]
+  val_fold <- train_set[-fold_indices, ]
   
   # Train the random forest model using ranger
   rf_model <- ranger(rating ~ userId + movieId, data = train_fold, num.trees = 50)
@@ -417,21 +417,32 @@ for (fold in 1:num_folds) {
   # Store the predictions in the cv_predictions vector
   cv_predictions[-fold_indices] <- fold_predictions
   
+  # Update RMSE
+  cv_rmse <- cv_rmse + RMSE(fold_predictions, val_fold$rating)
 }
 
-# Calculate RMSE on the full validation set
-cv_rmse <- RMSE(cv_predictions, cv_data$rating)
+# Calculate average RMSE across folds
+cv_rmse <- cv_rmse / num_folds
+
 cat("Cross-validated RMSE:", cv_rmse, "\n")
 
 rmse_results <- bind_rows(rmse_results,
                           data_frame(method = "Cross Validated Model",  
                                      RMSE = cv_rmse))
 rmse_results
+
 ```
 
-This was a good experiment and way to see if we could analyze smaller portions of the data and aggregate results (which we clearly can!), but the RMSE is less performant with this cross-validation method compared to the other RMSEs achieved with previous models, so we will likely run our final_holdout_test on a model that achieved a better RMSE with the test_set.
+This was a good experiment and way to see if we could fit smaller portions of the data and aggregate results (which we clearly can!), but the RMSE is less performant with this cross-validation method compared to the other RMSEs achieved with previous models, so we will likely run our final_holdout_test on a model that achieved a better RMSE with the test_set.
 
 ## Results
+
+First, let's inspect a sorted version of our RMSE summary table:
+
+```{r}
+rmse_results_sorted <- rmse_results %>% arrange(RMSE)
+rmse_results_sorted
+```
 
 Based on the rmse table, let's run our final_holdout_test on the best-performing model, the regularized movie + user + genre effect model:
 
@@ -509,8 +520,8 @@ round(final_rmse, 5)
 
 Overall, we achieved a decent RMSE using the regularized movie + user + genre effect model, but I think there were many opportunities here for improvement within our data pre-processing and modeling processes.
 
-First and foremost, I think this dataset required much more cleaning and refining than was completed in my project. Because there are so many observations, the data could have benefitted from some strategic subsetting, such as removing rows where no genre was listed, analyzing the timestamps and removing any rows showing years prior to a reasonable date range for the data, and removing observations showing major outliers in any of the variables. Also, I did not explore effects of the "timestamp" variable on rating, which could have provided valuable information and improved RMSE in certain models. This would have been relatively easy to transform this variable to a more usable and readable format.
+First and foremost, I think this dataset required much more cleaning and refining than was completed in my project. Although NAs were addressed in most of the models run, because there are so many observations, the data could have benefitted from some strategic subsetting, such as removing rows where no genre was listed, analyzing the timestamps and removing any rows showing years prior to a reasonable date range for the data, and removing observations showing major outliers in any of the variables. Also, I did not explore effects of the "timestamp" variable on rating, which could have provided valuable information and improved RMSE in certain models. This would have been relatively straightforward to implement and transform this variable to a more usable and readable format.
 
-In addition, using sparse matrices and one-hot encoding of genre variables to run in random forest models could have provided a more robust model for us to use. It was a challenge to run efficient models without overwhelming my machine and taking hours of runtime to test models, so further exploration of how to strategically subset and run this random forest model in a more efficient way could have been beneficial. In addition, tuning hyperparameters of the random forest model could have had the potential to significantly improve those results. This is something I plan to explore in the choose-your-own capstone project.
+In addition, using sparse matrices and one-hot encoding of genre variables to run in random forest models could have provided a more robust model for us to use. It was a challenge to run efficient models without overwhelming my machine and taking hours of runtime to test models, so further exploration of how to strategically subset and run this random forest model in a more efficient way could have been beneficial. In addition, tuning hyperparameters of the random forest model could have had the potential to significantly improve those results. This is something I plan to explore and implement in a different context as part of the choose-your-own capstone project process.
 
 Finally, just like experimenting with the hyperparameters in random forest would have likely helped the results, experimenting with different folds and parameters in the cross-validated model could have also likely improved results. In addition, using bootstrapping methods could have been a good strategy to explore as a modeling technique.

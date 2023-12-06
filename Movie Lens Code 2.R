@@ -109,13 +109,6 @@ ggplot(edx %>% group_by(rating) %>% summarize(count = n()), aes(x = rating, y = 
 
 # Visualize top genres:
 
-# Install and load required packages
-if (!require(tidyverse)) install.packages("tidyverse")
-if (!require(splitstackshape)) install.packages("splitstackshape")
-
-library(tidyverse)
-library(splitstackshape)
-
 # One-hot encode the data and split the genre into one per row 
 # (adding more rows as needed to accommodate the data) for ease of understanding the graph
 genres <- cSplit(edx, "genres", sep = "|", direction = "long")
@@ -284,30 +277,29 @@ rf_model_rmse
 
 # Update rmse_results
 rmse_results <- bind_rows(rmse_results,
-                          data_frame(method = "Regularized Movie + User + Genre Effect Model",  
+                          data_frame(method = "Random Forest - Subset of Data",  
                                      RMSE = rf_model_rmse))
 rmse_results
 
 # Now let's incorporate more runs subsets of the data using cross-validation:
 
 ## Cross validation
+# WARNING: This code could take up to ~30 minutes to run, pending your machine capabilities
 
 # Set the number of folds for cross-validation
 num_folds <- 5  # You can adjust the number of folds as needed
 
-# Create a data frame for cross-validation
-cv_data <- train_set
-
 # Create an empty vector to store cross-validated predictions
 cv_predictions <- numeric(length = nrow(cv_data))
+cv_rmse <- 0  # Initialize RMSE
 
 # Perform cross-validation
 for (fold in 1:num_folds) {
   # Create training and validation sets for the current fold
   set.seed(fold)  # Ensure reproducibility across folds
-  fold_indices <- createDataPartition(y = cv_data$rating, p = 0.8, list = FALSE)
-  train_fold <- cv_data[fold_indices, ]
-  val_fold <- cv_data[-fold_indices, ]
+  fold_indices <- createDataPartition(y = train_set$rating, p = 0.8, list = FALSE)
+  train_fold <- train_set[fold_indices, ]
+  val_fold <- train_set[-fold_indices, ]
   
   # Train the random forest model using ranger
   rf_model <- ranger(rating ~ userId + movieId, data = train_fold, num.trees = 50)
@@ -318,18 +310,26 @@ for (fold in 1:num_folds) {
   # Store the predictions in the cv_predictions vector
   cv_predictions[-fold_indices] <- fold_predictions
   
+  # Update RMSE
+  cv_rmse <- cv_rmse + RMSE(fold_predictions, val_fold$rating)
 }
+
+# Calculate average RMSE across folds
+cv_rmse <- cv_rmse / num_folds
+
+cat("Cross-validated RMSE:", cv_rmse, "\n")
 
 rmse_results <- bind_rows(rmse_results,
                           data_frame(method = "Cross Validated Model",  
                                      RMSE = cv_rmse))
 rmse_results
 
-# Calculate RMSE on the full validation set
-cv_rmse <- RMSE(cv_predictions, cv_data$rating)
-cat("Cross-validated RMSE:", cv_rmse, "\n")
-
 # Results:
+
+# View RMSE summary table, sorted by RMSE:
+
+rmse_results_sorted <- rmse_results %>% arrange(RMSE)
+rmse_results_sorted
 
 # Let's test our best model against the holdout_test_set to achieve our final RMSE:
 
