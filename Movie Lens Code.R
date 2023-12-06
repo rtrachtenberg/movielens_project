@@ -1,3 +1,7 @@
+# Notes for abalone:
+# Rename plots and reference normal dist of male/female in t-test assumption/prereq
+# 
+
 # Movielens dataset
 
 if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
@@ -76,14 +80,38 @@ rm(dl, ratings, movies, test_index, temp, movielens, removed)
 # Since we conducted some EDA already in our quiz, we will keep this simple
 # to focus on modeling:
 
+# Observe distribution of number of ratings by movieId
+ggplot(edx %>% count(movieId), aes(x = n)) +
+  geom_density(fill = "skyblue", color = "navy", alpha = 0.7) +
+  scale_x_log10() +
+  labs(title = "Distribution of Ratings per Movie",
+       x = "Number of Ratings (log scale)",
+       y = "Density") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+
 # Observe distribution of number of ratings by movieId and userId
-edx %>% count(movieId) %>% ggplot(aes(n)) + geom_density() + scale_x_log10() + ggtitle("movieId Distribution")
-edx %>% count(userId) %>% ggplot(aes(n)) + geom_density() + scale_x_log10() + ggtitle("userId Distribution")
+
+ggplot(edx %>% count(movieId), aes(x = n)) +
+  geom_density(fill = "pink", color = "salmon", alpha = 0.7) +
+  scale_x_log10() +
+  labs(title = "Distribution of Ratings per Movie",
+       x = "Number of Ratings (log scale)",
+       y = "Density") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
 
 # Let's look into which ratings are most popular
-edx %>% group_by(rating) %>% summarize(count = n()) %>% ggplot(aes(x = rating, y = count)) + geom_point() + ggtitle("Rating Distribution")
+ggplot(edx %>% group_by(rating) %>% summarize(count = n()), aes(x = rating, y = count)) +
+  geom_bar(stat = "identity", fill = "lightgreen", alpha = 0.7) +
+  labs(title = "Distribution of Ratings",
+       x = "Rating",
+       y = "Count") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
 # Looks like a rating of 4 is most popular.
 # Whole number ratings tend to be more popular than half ratings
+
 
 # Generate Machine Learning Models
 
@@ -136,13 +164,71 @@ rmse_summary <- bind_rows(rmse_summary,
                                  RMSE = model_2_rmse))
 rmse_summary
 
+# Regularize movie specific effect:
 
-# Apply regularization to movie-specific effect:
+lambdas <- seq(0, 10, 0.25)
+sum_only <- train_set %>% 
+  group_by(movieId) %>% 
+  summarize(sum_rating = sum(rating - overall_mean_rating), count_movies = n())
+
+regzed_rmses <- sapply(lambdas, function(lambda){
+  predicted_ratings <- test_set %>% 
+    left_join(sum_only, by='movieId') %>% 
+    mutate(b_ml = sum_rating/(count_movies + lambda)) %>%
+    mutate(pred = overall_mean_rating + b_ml) %>%
+    .$pred
+  return(RMSE(test_set$rating, predicted_ratings))
+})
+  
+best_lambda <- lambdas[which.min(regzed_rmses)]
+best_lambda
+
+b_m <- train_set %>% 
+  group_by(movieId) %>% 
+  summarize(b_m = sum(rating - overall_mean_rating)/(n() + best_lambda))
+
+predicted_ratings <- combined_table %>%
+  mutate(predicted_value = overall_mean_rating + b_m) %>%
+  pull(predicted_value)
+predicted_ratings
+
+model_3_rmse <- RMSE(predicted_ratings, test_set$rating)
+model_3_rmse
+
+rmse_summary <- bind_rows(rmse_summary,
+                          tibble(Model = "Model 3: Movie effect model w Regularization",
+                                 RMSE = model_3_rmse))
+
+# Add in the user-specific effect:
+
+movie_and_user_effect <- train_set %>% # create a new table, adding movie-specific effect b_m to train_set table, and group by user ID
+  left_join(movie_effect, by = "movieId") %>% 
+  group_by(userId) %>% 
+  summarize(b_u = mean(rating - overall_mean_rating - b_m)) # user effect = mean(train_set rating - baseline - movie effect)
+movie_and_user_effect # creates a table of just userId and user-specific effect
+
+combined_table <- test_set %>% 
+  left_join(movie_effect, by = "movieId") %>% 
+  left_join(movie_and_user_effect, by = "userId")
+combined_table
+
+predicted_ratings <- combined_table %>% mutate(predicted_value = overall_mean_rating + b_m + b_u) %>% 
+  pull(predicted_value)
+
+model_3_rmse <- RMSE(predicted_ratings, test_set$rating)
+model_3_rmse
+
+rmse_summary <- bind_rows(rmse_summary,
+                          tibble(Model = "Model 3: Movie and user effect model",
+                                 RMSE = model_3_rmse))
+
+
+# Apply regularization to movie- and user-specific effect:
 # The regularization term (sum_rating / (count_movies + lambda)) 
 # introduces a penalty for large values of sum_rating or count_movies.
 
 # Create a list of lambdas to test
-lambdas <- seq(0, 10, 0.25)
+lambdas <- seq(0, 5, 0.5)
 
 # calculate the # of ratings (count) and sum of the actual - mean rating for each movie
 # this data to be used later in the regularization term
@@ -162,8 +248,8 @@ regzed_rmses <- sapply(lambdas, function(lambda){
   return(RMSE(test_set$rating, predicted_ratings))
 })
 
-qplot(lambdas, regzed_rmses)  
 best_lambda <- lambdas[which.min(regzed_rmses)]
+best_lambda
 
 b_m <- train_set %>% 
   group_by(movieId) %>% 
@@ -174,26 +260,28 @@ predicted_ratings <- combined_table %>%
   pull(predicted_value)
 predicted_ratings
 
-model_3_rmse <- RMSE(predicted_ratings, final_holdout_test$rating)
-model_3_rmse
+model_4_rmse <- RMSE(predicted_ratings, test_set$rating)
+model_4_rmse
 
 rmse_summary <- bind_rows(rmse_summary,
-                          tibble(Model = "Model 3: Movie effect model w Regularization",
-                                 RMSE = model_3_rmse))
+                          tibble(Model = "Model 4: Regularized Model",
+                                 RMSE = model_4_rmse))
+
 
 # When lambda is non-zero, the regularization term discourages extreme values in the movie effect. It has a shrinking effect, pulling the b_ml values towards zero.
 # This helps prevent overfitting, especially when there are few ratings (count_movies) for a movie.
-# However, this adjustment did not seem to help much.
+# However, this adjustment did not seem to help at all, considering the best lambda was 0.
 
-# Add in the user-specific effect:
 
-movie_and_user_effect <- edx %>% # create a new table, adding movie-specific effect b_m to edx table, and group by user ID
+# add in genre-specific effect
+
+movie_and_user_effect <- train_set %>% # create a new table, adding movie-specific effect b_m to train_set table, and group by user ID
   left_join(movie_effect, by = "movieId") %>% 
   group_by(userId) %>% 
-  summarize(b_u = mean(rating - overall_mean_rating - b_m)) # user effect = mean(edx rating - baseline - movie effect)
+  summarize(b_u = mean(rating - overall_mean_rating - b_m)) # user effect = mean(train_set rating - baseline - movie effect)
 movie_and_user_effect # creates a table of just userId and user-specific effect
 
-combined_table <- final_holdout_test %>% 
+combined_table <- test_set %>% 
   left_join(movie_effect, by = "movieId") %>% 
   left_join(movie_and_user_effect, by = "userId")
 combined_table
@@ -201,49 +289,21 @@ combined_table
 predicted_ratings <- combined_table %>% mutate(predicted_value = overall_mean_rating + b_m + b_u) %>% 
   pull(predicted_value)
 
-model_3_rmse <- RMSE(predicted_ratings, final_holdout_test$rating)
+model_3_rmse <- RMSE(predicted_ratings, test_set$rating)
 model_3_rmse
 
 rmse_summary <- bind_rows(rmse_summary,
                           tibble(Model = "Model 3: Movie and user effect model",
                                  RMSE = model_3_rmse))
 
-# add in genre-specific effect
 
-movie_user_genre_effect <- edx %>% # create a new table, adding b_m and b_u to edx table, and group by genre
-  left_join(movie_effect, by = "movieId") %>% 
-  left_join(movie_and_user_effect, by = "userId") %>% 
-  group_by(genres) %>% 
-  summarize(b_g = mean(rating - overall_mean_rating - b_m - b_u)) # genre effect = mean(edx rating - baseline - movie effect - user effect)
-head(movie_user_genre_effect) # creates a table of just genre and genre-specific effect
-
-combined_table <- final_holdout_test %>% 
-  left_join(movie_effect, by = "movieId") %>% 
-  left_join(movie_and_user_effect, by = "userId") %>% 
-  left_join(movie_user_genre_effect, by = "genres")
-head(combined_table)
-
-predicted_ratings <- combined_table %>% mutate(predicted_value = overall_mean_rating + b_m + b_u + b_g) %>% 
-  pull(predicted_value)
-
-model_4_rmse <- RMSE(predicted_ratings, final_holdout_test$rating)
-model_4_rmse
-
-rmse_summary <- bind_rows(rmse_summary,
-                          tibble(Model = "Model 4: Movie, user, and genre effect model",
-                                 RMSE = model_4_rmse))
-
-moviegenres_test <- head(edx %>% select(movieId, genres))
-moviegenres_test
+moviegenres_test <- head(train_set %>% select(movieId, genres))
 moviegenres_split <- transpose(tstrsplit(moviegenres_test$genres, "|", fixed = TRUE, fill = "NA"))
 setNames(do.call(rbind.data.frame, moviegenres_split), c("1", "2", "3", "4"))
-moviegenres_split
 
 moviegenres_split <- as.data.frame(do.call(rbind, moviegenres_split))
-moviegenres_split
 
 moviegenres_movieid <- mutate(moviegenres_split, movieId = head(edx$movieId), .before = V1)
-moviegenres_movieid
 
 movies_long <- moviegenres_movieid %>% 
   pivot_longer(
@@ -252,12 +312,11 @@ movies_long <- moviegenres_movieid %>%
     values_to = "genre"
   )
 
+
 movies_long_coded <- movies_long %>% select(genre)
-movies_long_coded
 movies_long_coded <- as.data.frame(model.matrix( ~ . -1, movies_long_coded)) %>% mutate(movieId = movies_long$movieId, .before = genreAction)
-movies_long_coded
 movies_long_coded <- movies_long_coded %>% filter(genreNA == 0) %>% select(-(genreNA))
-movies_long_coded
-edx_short <- head(edx)
-test_run <- inner_join(edx_short, movies_long_coded, by = "movieId")
+
+train_set_short <- train_set
+test_run <- inner_join(train_set_short, movies_long_coded, by = "movieId")
 head(test_run)
