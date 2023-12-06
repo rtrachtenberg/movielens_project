@@ -1,0 +1,189 @@
+---
+title: "Movie Lens Project"
+author: "Roxie Trachtenberg"
+date: "2023-12-06"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+According to the Edx project description, the `movielens` data is pulled from the `dslabs` R package and contains a subset of a much larger dataset with millions of movie ratings. This version of the dataset contains 10 million observations with the following variables:
+
+-   **userId** is a discrete variable that contains a unique identifier for each user, or movie rater. Note that there can be more than one of the same userId in this dataset if they rate more than one movie or a movie more than once at a different time).
+
+-   **movieId** is a also a discrete variable that contains a unique identifier for each movie. Note that there can be more than one of the same movieId in this dataset, representing multiple ratings for the same movie.
+
+-   **rating** is a discrete variable indicating the number of "stars" awarded to the movie by a specific user at a certain time. Note that there are 11 distinct values that can be awarded, from 0 - 5 and incremented by 0.5.
+
+-   **timestamp** is a time and date identifier of when the movie rating was submitted. This could be converted to a more readable date format using a separate R package.
+
+-   **title** contains a character string of the movie title and year in a readable format.
+
+-   **genres** contains a character string of the main genre(s) of the particular movie in question.
+
+The goal of this project is to build upon concepts and code we have learned throughout the course, and specifically in Course 8, to predict movie ratings from the other features in the dataset. In order to achieve the lowest root mean-squared error (RMSE) possible, multiple techniques, including running a random forest model and utilizing regularization, were performed.
+
+## Methods and Analysis
+
+### Data Loading and Cleaning
+
+Note that no data cleaning was completed beyond what was provided as part of the project introductory information and all code below has been provided by project staff. This is a reiteration for clarity and continuity.
+
+First, all libraries necessary to complete our analyses were loaded:
+
+```{r, results = 'hide', message = FALSE, warning = FALSE}
+# Load libraries
+if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
+if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")
+library(tidyverse)
+library(caret)
+library(stringr)
+library(readr)
+library(dplyr)
+library(dslabs)
+library(data.table) 
+library(ranger)
+
+options(timeout = 120)
+
+```
+
+Then, the data was downloaded. merged, and class/column names slightly adjusted to be more comprehensive and readable:
+```{r}
+
+# Load data set from grouplens website
+dl <- "ml-10M100K.zip"
+if(!file.exists(dl))
+  download.file("https://files.grouplens.org/datasets/movielens/ml-10m.zip", dl)
+
+ratings_file <- "ml-10M100K/ratings.dat"
+if(!file.exists(ratings_file))
+  unzip(dl, ratings_file)
+
+movies_file <- "ml-10M100K/movies.dat"
+if(!file.exists(movies_file))
+  unzip(dl, movies_file)
+
+ratings <- as.data.frame(str_split(read_lines(ratings_file), fixed("::"), simplify = TRUE),
+                         stringsAsFactors = FALSE)
+
+colnames(ratings) <- c("userId", "movieId", "rating", "timestamp")
+
+# transform the column classes
+ratings <- ratings %>%
+  mutate(userId = as.integer(userId),
+         movieId = as.integer(movieId),
+         rating = as.numeric(rating),
+         timestamp = as.integer(timestamp))
+
+# add movie data and assign clear column names
+movies <- as.data.frame(str_split(read_lines(movies_file), fixed("::"), simplify = TRUE),
+                        stringsAsFactors = FALSE)
+colnames(movies) <- c("movieId", "title", "genres")
+
+# transform column classes
+movies <- movies %>%
+  mutate(movieId = as.integer(movieId))
+
+# join movies and ratings data frames to generate the movielens dataset
+movielens <- left_join(ratings, movies, by = "movieId")  
+```
+
+Finally, the final_holdout_test dataset (10% of the movielens dataset) was generated in order to provide a final test of our best model RMSE:
+
+```{r}
+set.seed(1, sample.kind="Rounding") # if using R 3.6 or later
+
+test_index <- createDataPartition(y = movielens$rating, times = 1, p = 0.1, list = FALSE)
+edx <- movielens[-test_index,]
+temp <- movielens[test_index,]
+
+# Make sure userId and movieId in test set are also in edx set
+final_holdout_test <- temp %>% 
+  semi_join(edx, by = "movieId") %>%
+  semi_join(edx, by = "userId")
+
+# Add rows removed from test set back into edx set
+removed <- anti_join(temp, final_holdout_test)
+edx <- rbind(edx, removed)
+
+# remove variables from memory no longer needed
+rm(dl, ratings, movies, test_index, temp, movielens, removed)
+```
+
+
+### Exploratory Data Analysis
+
+First, we should explore the distribution of the number of ratings by movieId:
+
+```{r}
+ggplot(edx %>% count(movieId), aes(x = n)) +
+  geom_density(fill = "skyblue", color = "navy", alpha = 0.7) +
+  scale_x_log10() +
+  labs(title = "Distribution of Ratings per Movie",
+       x = "Number of Ratings (log scale)",
+       y = "Density") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+From the plot, it looks like ratings are relatively normally distributed across all movies.
+
+Next, let's look at distribution of number of ratings per userId:
+
+```{r}
+ggplot(edx %>% count(userId), aes(x = n)) +
+  geom_density(fill = "pink", color = "salmon", alpha = 0.7) +
+  scale_x_log10() +
+  labs(title = "Distribution of Ratings per Movie",
+       x = "Number of Ratings (log scale)",
+       y = "Density") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+Again, this density plot is showing a relatively normal distribution of ratings per user. This makes sense since this is a large dataset with millions of observations, and the Central Limit Theorem tells us that the sampling distribution of the mean will always be normally distributed, as long as the sample size is large enough.
+
+Now, let's explore which ratings were most popular among users:
+
+```{r}
+ggplot(edx %>% group_by(rating) %>% summarize(count = n()), aes(x = rating, y = count)) +
+  geom_bar(stat = "identity", fill = "lightgreen", alpha = 0.7) +
+  labs(title = "Distribution of Ratings",
+       x = "Rating",
+       y = "Count") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+Seems like a rating of "4" is most popular and whole number ratings tend to be more popular than half ratings.
+
+### Modeling
+
+To start, I split the edx dataset into training and test sets and defined the RMSE function that we will use to assess our models going forward:
+
+```{r}
+# First, split edx dataset into test and train sets
+
+test_index <- createDataPartition(y = edx$rating, times = 1,
+                                  p = 0.2, list = FALSE)
+train_set <- edx[-test_index,]
+test_set <- edx[test_index,]
+test_set <- test_set %>% 
+  semi_join(train_set, by = "movieId") %>%
+  semi_join(train_set, by = "userId")
+
+# Define RMSE function
+RMSE <- function(true_ratings, predicted_ratings){
+  sqrt(mean((true_ratings - predicted_ratings)^2))
+}
+```
+
+
+
+
+

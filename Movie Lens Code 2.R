@@ -1,11 +1,6 @@
-# HarvardX: PH125.8x
-# Data Science: Machine Learning
-# R code from course videos
+# Movielens Project
 
-# Model Fitting and Recommendation Systems
-
-# Movielens dataset
-
+# Load libraries
 if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
 if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")
 library(tidyverse)
@@ -15,9 +10,11 @@ library(readr)
 library(dplyr)
 library(dslabs)
 library(data.table)
+library(ranger)
 
 options(timeout = 120)
 
+# Load data set from grouplens website
 dl <- "ml-10M100K.zip"
 if(!file.exists(dl))
   download.file("https://files.grouplens.org/datasets/movielens/ml-10m.zip", dl)
@@ -30,27 +27,33 @@ movies_file <- "ml-10M100K/movies.dat"
 if(!file.exists(movies_file))
   unzip(dl, movies_file)
 
+# add ratings data and assign clear column names
 ratings <- as.data.frame(str_split(read_lines(ratings_file), fixed("::"), simplify = TRUE),
                          stringsAsFactors = FALSE)
 
 colnames(ratings) <- c("userId", "movieId", "rating", "timestamp")
+
+# transform the column classes
 ratings <- ratings %>%
   mutate(userId = as.integer(userId),
          movieId = as.integer(movieId),
          rating = as.numeric(rating),
          timestamp = as.integer(timestamp))
 
+# add movie data and assign clear column names
 movies <- as.data.frame(str_split(read_lines(movies_file), fixed("::"), simplify = TRUE),
                         stringsAsFactors = FALSE)
 colnames(movies) <- c("movieId", "title", "genres")
 
+# transform column classes
 movies <- movies %>%
   mutate(movieId = as.integer(movieId))
 
+# join movies and ratings data frames to generate the movielens dataset
 movielens <- left_join(ratings, movies, by = "movieId")  
 
 # Final hold-out test set will be 10% of MovieLens data
-# NOTE: The hold-out test is NOT to be used throughout this code
+# NOTE: The hold-out test is NOT to be used throughout this code as a test set
 set.seed(1, sample.kind="Rounding") # if using R 3.6 or later
 
 test_index <- createDataPartition(y = movielens$rating, times = 1, p = 0.1, list = FALSE)
@@ -68,7 +71,43 @@ edx <- rbind(edx, removed)
 
 rm(dl, ratings, movies, test_index, temp, movielens, removed)
 
-# Split edx dataset into test and train sets
+# Exploratory Data Analysis
+
+# Observe distribution of number of ratings by movieId
+ggplot(edx %>% count(movieId), aes(x = n)) +
+  geom_density(fill = "skyblue", color = "navy", alpha = 0.7) +
+  scale_x_log10() +
+  labs(title = "Distribution of Ratings per Movie",
+       x = "Number of Ratings (log scale)",
+       y = "Density") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+
+# Observe distribution of number of ratings by userId
+
+ggplot(edx %>% count(userId), aes(x = n)) +
+  geom_density(fill = "pink", color = "salmon", alpha = 0.7) +
+  scale_x_log10() +
+  labs(title = "Distribution of Ratings per Movie",
+       x = "Number of Ratings (log scale)",
+       y = "Density") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+
+# Let's look into which ratings are most popular
+ggplot(edx %>% group_by(rating) %>% summarize(count = n()), aes(x = rating, y = count)) +
+  geom_bar(stat = "identity", fill = "lightgreen", alpha = 0.7) +
+  labs(title = "Distribution of Ratings",
+       x = "Rating",
+       y = "Count") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+# Looks like a rating of 4 is most popular.
+# Whole number ratings tend to be more popular than half ratings
+
+# Machine Learning Methods
+
+# First, split edx dataset into test and train sets
 
 test_index <- createDataPartition(y = edx$rating, times = 1,
                                   p = 0.2, list = FALSE)
@@ -190,3 +229,63 @@ rmse_results <- bind_rows(rmse_results,
                           data_frame(method = "Regularized Movie + User + Genre Effect Model",  
                                      RMSE = min(rmse_results_lambda$RMSE)))
 rmse_results
+
+
+# Ensemble Method
+
+# random forest model
+# Define the Random Forest model and use a subset of the data for training due to runtime issues
+subset_train_set <- as.data.table(train_set)[1:10000, ]
+
+rf_model <- randomForest(rating ~ userId + movieId + genres, data = subset_train_set, ntree = 5)
+
+# Print the summary of the Random Forest model
+print(rf_model)
+
+# Make predictions on the test set
+predicted_ratings_rf <- predict(rf_model, newdata = test_set)
+
+# Calculate RMSE
+rf_model_rmse <- RMSE(predicted_ratings_rf, test_set$rating)
+rf_model_rmse
+
+# Display RMSE for the Random Forest model
+cat("Random Forest Model RMSE:", rf_model_rmse, "\n")
+
+
+## Cross validation
+
+# Set the number of folds for cross-validation
+num_folds <- 5  # You can adjust the number of folds as needed
+
+# Create a data frame for cross-validation
+cv_data <- train_set
+
+# Create an empty vector to store cross-validated predictions
+cv_predictions <- numeric(length = nrow(cv_data))
+
+# Perform cross-validation
+for (fold in 1:num_folds) {
+  # Create training and validation sets for the current fold
+  set.seed(fold)  # Ensure reproducibility across folds
+  fold_indices <- createDataPartition(y = cv_data$rating, p = 0.8, list = FALSE)
+  train_fold <- cv_data[fold_indices, ]
+  val_fold <- cv_data[-fold_indices, ]
+  
+  # Train the random forest model using ranger
+  rf_model <- ranger(rating ~ userId + movieId, data = train_fold, num.trees = 50)
+  
+  # Make predictions on the validation set
+  fold_predictions <- predict(rf_model, data = val_fold)$predictions
+  
+  # Store the predictions in the cv_predictions vector
+  cv_predictions[-fold_indices] <- fold_predictions
+  
+}
+
+# Calculate RMSE on the full validation set
+cv_rmse <- RMSE(cv_predictions, cv_data$rating)
+cat("Cross-validated RMSE:", cv_rmse, "\n")
+
+
+

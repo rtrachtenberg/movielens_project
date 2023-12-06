@@ -1,9 +1,6 @@
-# Notes for abalone:
-# Rename plots and reference normal dist of male/female in t-test assumption/prereq
-# 
+# Movielens Project
 
-# Movielens dataset
-
+# Load libraries
 if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
 if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")
 library(tidyverse)
@@ -14,14 +11,6 @@ library(dplyr)
 library(data.table)
 
 options(timeout = 120)
-
-# note to self: The final_holdout_test set is meant to provide a final, 
-# unbiased estimate of your single best model. 
-# To test the performance of multiple models before choosing the best one, 
-# split the edx set into train and test sets and/or use cross-validation. 
-# The final_holdout_test may not be be used for model training, model development, 
-# or selecting from multiple models or else you will only receive 5 out of 25 points 
-# for the RMSE section of your MovieLens project.
 
 dl <- "ml-10M100K.zip"
 if(!file.exists(dl))
@@ -34,6 +23,10 @@ if(!file.exists(ratings_file))
 movies_file <- "ml-10M100K/movies.dat"
 if(!file.exists(movies_file))
   unzip(dl, movies_file)
+
+# Clean Data
+
+# 
 
 ratings <- as.data.frame(str_split(read_lines(ratings_file), fixed("::"), simplify = TRUE),
                          stringsAsFactors = FALSE)
@@ -166,7 +159,7 @@ rmse_summary
 # Add in the user-specific effect:
 
 movie_and_user_effect <- train_set %>% # create a new table, adding movie-specific effect b_m to train_set table, and group by user ID
-  left_join(movie_effect, by = "movieId") %>% 
+  left_join(movie_effect_train, by = "movieId") %>% 
   group_by(userId) %>% 
   summarize(b_u = mean(rating - overall_mean_rating - b_m)) # user effect = mean(train_set rating - baseline - movie effect)
 movie_and_user_effect # creates a table of just userId and user-specific effect
@@ -190,15 +183,16 @@ rmse_summary <- bind_rows(rmse_summary,
 
 # add in genre-specific effect
 
-movie_and_user_effect <- train_set %>% # create a new table, adding movie-specific effect b_m to train_set table, and group by user ID
-  left_join(movie_effect, by = "movieId") %>% 
-  group_by(userId) %>% 
-  summarize(b_u = mean(rating - overall_mean_rating - b_m)) # user effect = mean(train_set rating - baseline - movie effect)
-movie_and_user_effect # creates a table of just userId and user-specific effect
+genre_movie_user_effect <- train_set %>% # create a new table, adding genre-specific effect b_g to train_set table, and group by genre
+  left_join(movie_effect, by = "userId") %>% 
+  group_by(genres) %>% 
+  summarize(b_g = mean(rating - overall_mean_rating - b_m - b_u)) # genre effect = mean(train_set rating - baseline - movie effect - user effect)
+
+genre_movie_user_effect # creates a table of just userId and genre-specific effect
 
 combined_table <- test_set %>% 
   left_join(movie_effect, by = "movieId") %>% 
-  left_join(movie_and_user_effect, by = "userId")
+  left_join(movie_effect, by = "userId")
 combined_table
 
 predicted_ratings <- combined_table %>% mutate(predicted_value = overall_mean_rating + b_m + b_u) %>% 
@@ -210,7 +204,7 @@ model_4_rmse
 rmse_summary <- bind_rows(rmse_summary,
                           tibble(Model = "Model 4: Genre, movie, and user effect model",
                                  RMSE = model_4_rmse))
-
+## One hot encoding
 
 moviegenres_test <- head(train_set %>% select(movieId, genres))
 moviegenres_split <- transpose(tstrsplit(moviegenres_test$genres, "|", fixed = TRUE, fill = "NA"))
